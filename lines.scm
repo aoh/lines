@@ -1,11 +1,5 @@
 #!/usr/bin/ol --run
 
-;; lazy intern + read
-; stream all input files to (reverse) byte list streams
-; if sorted mode, step all to lex order
-; apply given operation to state and elems 
-; if lex order is broken
-
 (import
    (owl args))
 
@@ -44,10 +38,10 @@
 (define (read-block fd)
    (get-block fd #x7fff))
 
-(define (read-file-quick store path noter all)
+(define (read-file-quick store path noter)
    (let ((fd (if (equal? path "-") stdin (open-input-file path))))
       (if fd
-         (let loop ((store store) (block #false) (pos 0) (end 0) (cs null) (ls #empty) (allp #empty))
+         (let loop ((store store) (block #false) (pos 0) (end 0) (cs null) (ls #empty))
             (if (eq? pos end)
                (lets ((next (read-block fd)))
                   (if (eof? next)
@@ -56,30 +50,23 @@
                            (if (not (eq? fd stdin))
                               (close-port fd))
                            ;; leaves are sorted
-                           (values store (ff-foldr (λ (out k v) (cons k out)) null ls) all))
+                           (values store (ff-foldr (λ (out k v) (cons k out)) null ls)))
                         (begin
                            (noter "Warning: no newline at end of file: " path)
-                           (loop store (vector 10) 0 1 cs ls all)))
-                     (loop store next 0 (sizeb next) cs ls all)))
+                           (loop store (vector 10) 0 1 cs ls)))
+                     (loop store next 0 (sizeb next) cs ls)))
                (lets
                   ((c (refb block pos))
                    (pos _ (fx+ pos 1)))
                   (if (eq? c 10)
                      (lets ((store line (intern store cs)))
-                        (cond
-                           ((not line)
-                              ;; blacklisted
-                              (loop store block pos end null ls all))
-                           ((get all line #false)
-                              ;; already seen everywhere, do not record, remember seeing it again
-                              (loop store block pos end null ls 
-                                 (put allp line #true)))
-                           (else
-                              (loop store block pos end null (put ls line #true) all) ;; could also count if necessary
-                     (loop store block pos end (cons c cs) ls all)))))
+                        (if line
+                           (loop store block pos end null (put ls line #true)) ;; could also count if necessary
+                           (loop store block pos end null ls)))
+                     (loop store block pos end (cons c cs) ls)))))
          (begin
             (print-to stderr "ERROR: cannot read " path)
-            (values store #false all)))))
+            (values store #false)))))
 
 ;; set all leaf values to #false 
 (define (blacken ff)
@@ -90,13 +77,13 @@
             (fupd this k #false)))
       ff ff))
 
-(define (maybe-read-blacklists noter pathp)
+(define (maybe-read-blacklist noter pathp)
    (lets/cc fail
       ((store
          (fold 
             (λ (store path)
                (lets
-                  ((store ls all (read-file-quick store path noter #empty)))
+                  ((store ls (read-file-quick store path noter)))
                   (if ls
                      (begin
                         (noter "blacklisted " (length ls) " lines from " path)
@@ -107,16 +94,17 @@
             #empty pathp)))
       (blacken store)))
 
+;; ((path . sorted-interned-lines) ...)
 (define (read-files store paths noter)
    (lets
       ((count (length paths))
        (start (time-ms)))
-      (let loop ((store store) (paths paths) (done null) (n 1) (all #empty))
+      (let loop ((store store) (paths paths) (done null) (n 1))
          (if (null? paths)
             ;; no need to intern more, lines are now eq?
-            (values (reverse done) #empty)
+            (reverse done)
             (lets
-               ((store this all (read-file-quick store (car paths) noter all))
+               ((store this (read-file-quick store (car paths) noter))
                 (node (cons (car paths) this))
                 (elapsed (+ 1 (- (time-ms) start)))
                 (avg (floor (/ elapsed n)))
@@ -124,9 +112,9 @@
                 (m s (quotrem (floor left-est) 60)))
                (if this
                   (begin
-                     (noter n "/" count " (" (length (cdr node)) "): " (car paths) ", left " m ":" s)
-                     (loop store (cdr paths) (cons node done) (+ n 1) all))
-                  (values #false #empty)))))))
+                     (noter n "/" count " (" (length (cdr node)) "): " (car paths) ", left " m ":" (if (< s 10) "0" "") s)
+                     (loop store (cdr paths) (cons node done) (+ n 1)))
+                  #false))))))
 
 (define (substract node best)
    (define (sub a b)
@@ -268,16 +256,10 @@
                   stderr-writer
                   sinker))
              (store
-               (maybe-read-blacklists noter
+               (maybe-read-blacklist noter
                   (get dict 'blacklist null)))
-             (data all
-               (read-files store args noter))
-             (all-lst 
-               (ff-fold (λ (out node _) (cons node out)) null all))
              (data
-                (map 
-                  (λ (source) (append source all-lst))
-                  data)))
+               (read-files store args noter)))
             (if (and store data)
                (output-lines
                   (getf dict 'sort)
