@@ -4,7 +4,7 @@ BINDIR=/bin
 INSTALL=install
 CFLAGS=-Wall -O2
 OFLAGS=-O2
-
+OL=owl-lisp/bin/ol
 
 everything: lines .stamp
 
@@ -29,8 +29,9 @@ blab/bin/blab: owl-lisp/bin/ol
 lines: lines.c
 	cc ${CFLAGS} -o lines lines.c
 
-lines.c: lines.scm owl-lisp/bin/ol
-	owl-lisp/bin/ol ${OFLAGS} -o lines.c lines.scm
+lines.c: lines.scm
+	test -x ${OL} || make owl-lisp/bin/ol
+	${OL} ${OFLAGS} -o lines.c lines.scm
 
 clean:
 	-rm -rf lines lines.c tmp .stamp
